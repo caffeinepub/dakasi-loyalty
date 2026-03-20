@@ -1,26 +1,25 @@
-# Dakasi Loyalty
+# Dakasi Loyalty - Admin Portal Enhancement
 
 ## Current State
-Any logged-in user goes to CustomerPage regardless of role. Admins can assign roles but only to users with loyalty data.
+AdminPage.tsx has a basic admin view with pending registrations and customer list. Actions: add stamp, redeem voucher, role change.
 
 ## Requested Changes (Diff)
 
 ### Add
-- Backend: pendingUsers map, registerGuestVisit(), getPendingUsers()
-- Frontend: PendingPage for guests waiting for admin approval
-- AdminPage: Pending users section with Register button
+- Stats overview cards (total customers, stamps issued, active vouchers)
+- Tabbed navigation: Overview | Customers | Pending
+- Customer search/filter
+- Customer name from profile when available
 
 ### Modify
-- App.tsx: Route guests to PendingPage, call registerGuestVisit on login
-- AdminPage: Show pending users list
+- AdminPage: full portal layout with tabs, stats, search
 
 ### Remove
 - Nothing
 
 ## Implementation Plan
-1. Add pendingUsers tracking to main.mo
-2. Update backend.d.ts
-3. Create PendingPage
-4. Update App.tsx routing
-5. Update AdminPage with pending section
-6. Add new hooks to useQueries.ts
+1. Add tab navigation with Overview, Customers, Pending tabs
+2. Overview tab: stat cards (customers, stamps, active vouchers, redeemed vouchers)
+3. Customers tab: search input + enhanced customer cards with name
+4. Pending tab: existing pending registration flow
+5. Preserve all current actions
