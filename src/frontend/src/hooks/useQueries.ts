@@ -169,3 +169,51 @@ export function useRegisterUser() {
     },
   });
 }
+
+export function useAllUserProfiles() {
+  const { actor, isFetching } = useActor();
+  return useQuery<[Principal, { name: string }][]>({
+    queryKey: ["allUserProfiles"],
+    queryFn: async () => {
+      if (!actor) return [];
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      return (actor as any).getAllUserProfiles();
+    },
+    enabled: !!actor && !isFetching,
+  });
+}
+
+export function useRegisterUserWithName() {
+  const { actor } = useActor();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ user, name }: { user: Principal; name: string }) => {
+      if (!actor) throw new Error("No actor");
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      await (actor as any).registerUserWithName(user, name);
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["pendingUsers"] });
+      qc.invalidateQueries({ queryKey: ["allUsersLoyalty"] });
+      qc.invalidateQueries({ queryKey: ["allUserProfiles"] });
+    },
+  });
+}
+
+export function useSetUserProfileByAdmin() {
+  const { actor } = useActor();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({
+      user,
+      profile,
+    }: { user: Principal; profile: { name: string } }) => {
+      if (!actor) throw new Error("No actor");
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      await (actor as any).setUserProfileByAdmin(user, profile);
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["allUserProfiles"] });
+    },
+  });
+}

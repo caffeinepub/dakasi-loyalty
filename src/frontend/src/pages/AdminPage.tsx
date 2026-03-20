@@ -12,14 +12,17 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import type { Principal } from "@icp-sdk/core/principal";
 import {
+  Check,
   Gift,
   Loader2,
+  Pencil,
   Search,
   Stamp,
   Star,
   TicketCheck,
   UserCheck,
   Users,
+  X,
 } from "lucide-react";
 import { motion } from "motion/react";
 import { useMemo, useState } from "react";
@@ -27,11 +30,14 @@ import { toast } from "sonner";
 import { UserRole } from "../backend";
 import {
   useAddStamp,
+  useAllUserProfiles,
   useAllUsersLoyalty,
   useAssignRole,
   usePendingUsers,
   useRedeemVoucher,
   useRegisterUser,
+  useRegisterUserWithName,
+  useSetUserProfileByAdmin,
 } from "../hooks/useQueries";
 
 const MONTHS = [
@@ -99,18 +105,133 @@ function StatCard({
   );
 }
 
+function InlineNameEditor({
+  principal,
+  currentName,
+}: {
+  principal: Principal;
+  currentName: string | null;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [nameVal, setNameVal] = useState(currentName ?? "");
+  const setProfile = useSetUserProfileByAdmin();
+
+  const handleSave = async () => {
+    if (!nameVal.trim()) return;
+    try {
+      await setProfile.mutateAsync({
+        user: principal,
+        profile: { name: nameVal.trim() },
+      });
+      toast.success("Name saved!");
+      setEditing(false);
+    } catch {
+      toast.error("Failed to save name.");
+    }
+  };
+
+  if (editing) {
+    return (
+      <div className="flex items-center gap-1.5">
+        <Input
+          value={nameVal}
+          onChange={(e) => setNameVal(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") handleSave();
+            if (e.key === "Escape") setEditing(false);
+          }}
+          className="h-7 text-sm rounded-lg px-2"
+          style={{
+            background: "oklch(0.97 0.02 75)",
+            borderColor: "oklch(0.80 0.08 75)",
+            width: "150px",
+          }}
+          autoFocus
+          data-ocid="admin.input"
+        />
+        <Button
+          size="sm"
+          onClick={handleSave}
+          disabled={setProfile.isPending}
+          className="h-7 w-7 p-0 rounded-lg"
+          style={{ background: "oklch(0.42 0.09 55)" }}
+          data-ocid="admin.save_button"
+        >
+          {setProfile.isPending ? (
+            <Loader2 className="w-3 h-3 animate-spin" />
+          ) : (
+            <Check className="w-3 h-3" />
+          )}
+        </Button>
+        <Button
+          size="sm"
+          variant="ghost"
+          onClick={() => setEditing(false)}
+          className="h-7 w-7 p-0 rounded-lg"
+          data-ocid="admin.cancel_button"
+        >
+          <X className="w-3 h-3" />
+        </Button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex items-center gap-1.5">
+      {currentName ? (
+        <span
+          className="font-bold text-base font-display"
+          style={{ color: "oklch(0.25 0.09 55)" }}
+        >
+          {currentName}
+        </span>
+      ) : (
+        <span className="text-sm text-muted-foreground italic">
+          Unknown Customer
+        </span>
+      )}
+      <button
+        type="button"
+        onClick={() => {
+          setNameVal(currentName ?? "");
+          setEditing(true);
+        }}
+        className="p-1 rounded-md hover:bg-black/5 transition-colors"
+        title="Edit name"
+        data-ocid="admin.edit_button"
+      >
+        <Pencil className="w-3 h-3" style={{ color: "oklch(0.55 0.06 75)" }} />
+      </button>
+    </div>
+  );
+}
+
 export function AdminPage() {
   const { data: allUsers, isLoading } = useAllUsersLoyalty();
   const { data: pendingUsers, isLoading: pendingLoading } = usePendingUsers();
+  const { data: userProfiles } = useAllUserProfiles();
   const addStamp = useAddStamp();
   const redeemVoucher = useRedeemVoucher();
   const assignRole = useAssignRole();
   const registerUser = useRegisterUser();
+  const registerUserWithName = useRegisterUserWithName();
   const [pendingStamp, setPendingStamp] = useState<string | null>(null);
   const [pendingRedeem, setPendingRedeem] = useState<string | null>(null);
   const [pendingRole, setPendingRole] = useState<string | null>(null);
   const [pendingRegister, setPendingRegister] = useState<string | null>(null);
   const [search, setSearch] = useState("");
+  const [pendingNames, setPendingNames] = useState<Record<string, string>>({});
+
+  // Build a map of principal string -> name
+  const nameMap = useMemo(() => {
+    const map: Record<string, string> = {};
+    if (userProfiles) {
+      for (const [p, profile] of userProfiles) {
+        if (profile.name) map[p.toString()] = profile.name;
+      }
+    }
+    return map;
+  }, [userProfiles]);
 
   const stats = useMemo(() => {
     if (!allUsers)
@@ -142,10 +263,12 @@ export function AdminPage() {
     if (!allUsers) return [];
     if (!search.trim()) return allUsers;
     const q = search.toLowerCase();
-    return allUsers.filter(([principal]) =>
-      principal.toString().toLowerCase().includes(q),
-    );
-  }, [allUsers, search]);
+    return allUsers.filter(([principal]) => {
+      const principalStr = principal.toString().toLowerCase();
+      const name = (nameMap[principal.toString()] ?? "").toLowerCase();
+      return principalStr.includes(q) || name.includes(q);
+    });
+  }, [allUsers, search, nameMap]);
 
   const handleAddStamp = async (user: Principal) => {
     const key = user.toString();
@@ -189,9 +312,19 @@ export function AdminPage() {
   const handleRegister = async (user: Principal) => {
     const key = user.toString();
     setPendingRegister(key);
+    const name = pendingNames[key]?.trim();
     try {
-      await registerUser.mutateAsync(user);
+      if (name) {
+        await registerUserWithName.mutateAsync({ user, name });
+      } else {
+        await registerUser.mutateAsync(user);
+      }
       toast.success("User registered! 🎉");
+      setPendingNames((prev) => {
+        const next = { ...prev };
+        delete next[key];
+        return next;
+      });
     } catch {
       toast.error("Failed to register user.");
     } finally {
@@ -349,50 +482,63 @@ export function AdminPage() {
                   (a, b) => Number(b[1].stampCount) - Number(a[1].stampCount),
                 )
                 .slice(0, 5)
-                .map(([principal, loyalty], idx) => (
-                  <div
-                    key={principal.toString()}
-                    className="px-4 py-3 flex items-center justify-between"
-                    style={{
-                      background:
-                        idx % 2 === 0
-                          ? "oklch(0.99 0.012 75)"
-                          : "oklch(0.97 0.02 75)",
-                      borderTop:
-                        idx === 0 ? "none" : "1px solid oklch(0.93 0.03 75)",
-                    }}
-                    data-ocid={`admin.row.${idx + 1}`}
-                  >
-                    <span
-                      className="text-sm font-mono"
-                      style={{ color: "oklch(0.42 0.07 55)" }}
+                .map(([principal, loyalty], idx) => {
+                  const name = nameMap[principal.toString()];
+                  return (
+                    <div
+                      key={principal.toString()}
+                      className="px-4 py-3 flex items-center justify-between"
+                      style={{
+                        background:
+                          idx % 2 === 0
+                            ? "oklch(0.99 0.012 75)"
+                            : "oklch(0.97 0.02 75)",
+                        borderTop:
+                          idx === 0 ? "none" : "1px solid oklch(0.93 0.03 75)",
+                      }}
+                      data-ocid={`admin.row.${idx + 1}`}
                     >
-                      {shortPrincipal(principal)}
-                    </span>
-                    <div className="flex items-center gap-2">
-                      <span
-                        className="text-sm font-bold"
-                        style={{ color: "oklch(0.42 0.09 55)" }}
-                      >
-                        {Number(loyalty.stampCount)} stamps
-                      </span>
-                      {loyalty.vouchers.filter((v) => !v.redeemed).length >
-                        0 && (
-                        <Badge
-                          className="text-[10px] px-1.5 py-0"
-                          style={{
-                            background: "oklch(0.55 0.18 55 / 0.15)",
-                            color: "oklch(0.40 0.10 55)",
-                            border: "none",
-                          }}
+                      <div className="min-w-0">
+                        {name && (
+                          <p
+                            className="text-sm font-bold"
+                            style={{ color: "oklch(0.28 0.09 55)" }}
+                          >
+                            {name}
+                          </p>
+                        )}
+                        <span
+                          className="text-xs font-mono"
+                          style={{ color: "oklch(0.55 0.07 55)" }}
                         >
-                          {loyalty.vouchers.filter((v) => !v.redeemed).length}{" "}
-                          active
-                        </Badge>
-                      )}
+                          {shortPrincipal(principal)}
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <span
+                          className="text-sm font-bold"
+                          style={{ color: "oklch(0.42 0.09 55)" }}
+                        >
+                          {Number(loyalty.stampCount)} stamps
+                        </span>
+                        {loyalty.vouchers.filter((v) => !v.redeemed).length >
+                          0 && (
+                          <Badge
+                            className="text-[10px] px-1.5 py-0"
+                            style={{
+                              background: "oklch(0.55 0.18 55 / 0.15)",
+                              color: "oklch(0.40 0.10 55)",
+                              border: "none",
+                            }}
+                          >
+                            {loyalty.vouchers.filter((v) => !v.redeemed).length}{" "}
+                            active
+                          </Badge>
+                        )}
+                      </div>
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
             </div>
           ) : (
             <div
@@ -422,7 +568,7 @@ export function AdminPage() {
           <div className="relative">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
             <Input
-              placeholder="Search by principal…"
+              placeholder="Search by name or principal…"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               className="pl-9 rounded-xl h-10"
@@ -473,6 +619,7 @@ export function AdminPage() {
                 const isStamping = pendingStamp === key;
                 const isRedeeming = pendingRedeem === key;
                 const isRoling = pendingRole === key;
+                const customerName = nameMap[key] ?? null;
 
                 return (
                   <motion.div
@@ -488,15 +635,19 @@ export function AdminPage() {
                     }}
                     data-ocid={`admin.item.${idx + 1}`}
                   >
-                    <div className="flex items-center justify-between gap-3 flex-wrap">
-                      <div className="min-w-0">
+                    <div className="flex items-start justify-between gap-3 flex-wrap">
+                      <div className="min-w-0 space-y-0.5">
+                        <InlineNameEditor
+                          principal={principal}
+                          currentName={customerName}
+                        />
                         <p
-                          className="font-semibold text-sm font-mono truncate"
-                          style={{ color: "oklch(0.30 0.08 55)" }}
+                          className="text-xs font-mono"
+                          style={{ color: "oklch(0.55 0.07 55)" }}
                         >
                           {shortPrincipal(principal)}
                         </p>
-                        <div className="flex items-center gap-2 mt-1">
+                        <div className="flex items-center gap-2 pt-0.5">
                           <span
                             className="text-sm font-display font-bold"
                             style={{ color: "oklch(0.42 0.09 55)" }}
@@ -682,37 +833,55 @@ export function AdminPage() {
                     animate={{ opacity: 1, x: 0 }}
                     exit={{ opacity: 0, x: 12 }}
                     transition={{ delay: idx * 0.04 }}
-                    className="rounded-2xl px-4 py-3 flex items-center justify-between gap-3"
+                    className="rounded-2xl px-4 py-3 space-y-2"
                     style={{
                       background: "oklch(0.97 0.025 75)",
                       border: "1px solid oklch(0.88 0.06 75)",
                     }}
                     data-ocid={`admin.item.${idx + 1}`}
                   >
-                    <div className="flex items-center gap-2 min-w-0">
-                      <span className="text-base">👤</span>
-                      <span
-                        className="text-sm font-medium font-mono truncate"
-                        style={{ color: "oklch(0.30 0.08 55)" }}
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="flex items-center gap-2 min-w-0">
+                        <span className="text-base">👤</span>
+                        <span
+                          className="text-sm font-medium font-mono truncate"
+                          style={{ color: "oklch(0.30 0.08 55)" }}
+                        >
+                          {shortPrincipal(principal)}
+                        </span>
+                      </div>
+                      <Button
+                        size="sm"
+                        onClick={() => handleRegister(principal)}
+                        disabled={isRegistering}
+                        className="rounded-xl flex items-center gap-1.5 text-xs h-8 shrink-0"
+                        style={{ background: "oklch(0.42 0.09 55)" }}
+                        data-ocid="admin.primary_button"
                       >
-                        {shortPrincipal(principal)}
-                      </span>
+                        {isRegistering ? (
+                          <Loader2 className="w-3 h-3 animate-spin" />
+                        ) : (
+                          <UserCheck className="w-3 h-3" />
+                        )}
+                        Register
+                      </Button>
                     </div>
-                    <Button
-                      size="sm"
-                      onClick={() => handleRegister(principal)}
-                      disabled={isRegistering}
-                      className="rounded-xl flex items-center gap-1.5 text-xs h-8 shrink-0"
-                      style={{ background: "oklch(0.42 0.09 55)" }}
-                      data-ocid="admin.primary_button"
-                    >
-                      {isRegistering ? (
-                        <Loader2 className="w-3 h-3 animate-spin" />
-                      ) : (
-                        <UserCheck className="w-3 h-3" />
-                      )}
-                      Register
-                    </Button>
+                    <Input
+                      placeholder="Customer name (optional)"
+                      value={pendingNames[key] ?? ""}
+                      onChange={(e) =>
+                        setPendingNames((prev) => ({
+                          ...prev,
+                          [key]: e.target.value,
+                        }))
+                      }
+                      className="h-8 text-sm rounded-xl"
+                      style={{
+                        background: "oklch(0.99 0.01 75)",
+                        borderColor: "oklch(0.83 0.06 75)",
+                      }}
+                      data-ocid="admin.input"
+                    />
                   </motion.div>
                 );
               })}

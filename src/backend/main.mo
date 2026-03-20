@@ -1,6 +1,5 @@
 import Time "mo:core/Time";
 import Text "mo:core/Text";
-import Iter "mo:core/Iter";
 import Map "mo:core/Map";
 import Int "mo:core/Int";
 import List "mo:core/List";
@@ -61,7 +60,6 @@ actor {
 
   // Called by guests when they first sign in, to appear in admin's pending list
   public shared ({ caller }) func registerGuestVisit() : async () {
-    // Check the role map directly to avoid trapping on unregistered users
     switch (accessControlState.userRoles.get(caller)) {
       case (?#admin) { return };
       case (?#user) { return };
@@ -86,6 +84,34 @@ actor {
     };
     AccessControl.assignRole(accessControlState, caller, user, #user);
     pendingUsers.remove(user);
+  };
+
+  // Admin: register a guest with a name
+  public shared ({ caller }) func registerUserWithName(user : Principal, name : Text) : async () {
+    if (not AccessControl.isAdmin(accessControlState, caller)) {
+      Runtime.trap("Unauthorized: Only admins can register users");
+    };
+    AccessControl.assignRole(accessControlState, caller, user, #user);
+    pendingUsers.remove(user);
+    if (name.size() > 0) {
+      userProfiles.add(user, { name });
+    };
+  };
+
+  // Admin: set a user's name/profile
+  public shared ({ caller }) func setUserProfileByAdmin(user : Principal, profile : UserProfile) : async () {
+    if (not AccessControl.isAdmin(accessControlState, caller)) {
+      Runtime.trap("Unauthorized: Only admins can set user profiles");
+    };
+    userProfiles.add(user, profile);
+  };
+
+  // Admin: get all user profiles
+  public query ({ caller }) func getAllUserProfiles() : async [(Principal, UserProfile)] {
+    if (not AccessControl.isAdmin(accessControlState, caller)) {
+      Runtime.trap("Unauthorized: Only admins can view all profiles");
+    };
+    userProfiles.toArray();
   };
 
   public query ({ caller }) func getCallerUserProfile() : async ?UserProfile {
